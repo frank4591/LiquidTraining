@@ -1,0 +1,16 @@
+# Requirements for LFM2-VL-1.6B model
+# Based on: https://huggingface.co/LiquidAI/LFM2-VL-1.6B
+
+# Core dependencies
+torch>=2.0.0
+transformers>=4.55.0
+pillow>=9.0.0
+huggingface-hub>=0.19.0
+
+# Additional dependencies
+numpy>=1.21.0
+accelerate>=0.20.0
+
+# Optional: for better performance
+# bitsandbytes>=0.41.0  # For quantization
+# xformers>=0.0.20      # For memory efficient attention
