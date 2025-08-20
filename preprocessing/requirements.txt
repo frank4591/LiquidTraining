@@ -1,0 +1,8 @@
+# Requirements for Instagram Dataset Preprocessing
+# Minimal dependencies for preprocessing scripts
+
+# Image processing
+pillow>=9.0.0
+
+# Standard library dependencies (usually included with Python)
+# json, zipfile, shutil, pathlib, argparse, logging, datetime, re, hashlib

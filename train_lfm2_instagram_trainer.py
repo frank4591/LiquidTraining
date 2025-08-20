@@ -40,6 +40,10 @@ import argparse
 from datetime import datetime
 import numpy as np
 
+# Disable wandb completely
+os.environ["WANDB_DISABLED"] = "true"
+os.environ["WANDB_MODE"] = "disabled"
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -124,15 +128,30 @@ class InstagramCaptionDataset(Dataset):
                 }
             ]
             
-            # Process inputs
-            inputs = self.processor.apply_chat_template(
+            # Process inputs - first get the text, then tokenize it
+            conversation_text = self.processor.apply_chat_template(
                 conversation,
                 add_generation_prompt=False,
-                return_tensors="pt"
+                return_tensors=None  # Get text first
             )
             
-            # Remove batch dimension
-            inputs = inputs.squeeze(0)
+            # Now tokenize the text properly
+            try:
+                inputs = self.processor.tokenizer(
+                    conversation_text,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=self.max_length
+                )
+                
+                # Get the input_ids
+                inputs = inputs["input_ids"].squeeze(0)
+                
+            except Exception as e:
+                logger.warning(f"Error tokenizing conversation: {e}")
+                # Create a dummy tensor as fallback
+                inputs = torch.zeros(self.max_length, dtype=torch.long)
             
             # Truncate if too long
             if len(inputs) > self.max_length:
@@ -146,40 +165,64 @@ class InstagramCaptionDataset(Dataset):
             
         except Exception as e:
             logger.warning(f"Error processing item {idx}: {e}")
-            # Return a dummy item
-            dummy_input = torch.zeros(self.max_length, dtype=torch.long)
-            return {
-                'input_ids': dummy_input,
-                'attention_mask': torch.zeros_like(dummy_input),
-                'labels': dummy_input.clone()
-            }
+            # Return a dummy item with proper error handling
+            try:
+                dummy_input = torch.zeros(self.max_length, dtype=torch.long)
+                return {
+                    'input_ids': dummy_input,
+                    'attention_mask': torch.ones_like(dummy_input),  # Use ones instead of zeros
+                    'labels': dummy_input.clone()
+                }
+            except Exception as fallback_error:
+                logger.error(f"Critical error creating dummy item for {idx}: {fallback_error}")
+                # Return minimal valid item
+                return {
+                    'input_ids': torch.tensor([0], dtype=torch.long),
+                    'attention_mask': torch.tensor([1], dtype=torch.long),
+                    'labels': torch.tensor([0], dtype=torch.long)
+                }
 
-def create_sample_dataset(data_dir):
-    """Create a sample Instagram dataset structure"""
-    os.makedirs(data_dir, exist_ok=True)
-    
-    # Create sample metadata
-    sample_data = [
-        {
-            "image_path": "sample1.jpg",
-            "caption": "Beautiful sunset vibes! 🌅 Nature never fails to amaze me. #sunset #nature #photography"
-        },
-        {
-            "image_path": "sample2.jpg", 
-            "caption": "When the sky paints itself in golden hour magic ✨ #goldenhour #sky #photography"
-        },
-        {
-            "image_path": "sample3.jpg",
-            "caption": "Sunset serenity - the perfect way to end the day 🌅 #serenity #sunset #peace"
-        }
-    ]
-    
+def validate_dataset(data_dir):
+    """Validate the Instagram dataset structure"""
     metadata_file = os.path.join(data_dir, "metadata.json")
-    with open(metadata_file, 'w') as f:
-        json.dump(sample_data, f, indent=2)
     
-    logger.info(f"Sample dataset structure created in {data_dir}")
-    logger.info("Please add your actual Instagram images and captions to this directory")
+    if not os.path.exists(metadata_file):
+        raise ValueError(f"Metadata file not found: {metadata_file}")
+    
+    # Load and validate metadata
+    with open(metadata_file, 'r') as f:
+        metadata = json.load(f)
+    
+    if not isinstance(metadata, list):
+        raise ValueError("Metadata should be a list of posts")
+    
+    if len(metadata) == 0:
+        raise ValueError("Dataset is empty")
+    
+    # Validate each post
+    valid_posts = 0
+    for i, post in enumerate(metadata):
+        if not isinstance(post, dict):
+            logger.warning(f"Post {i} is not a dictionary, skipping")
+            continue
+            
+        if 'image_path' not in post or 'caption' not in post:
+            logger.warning(f"Post {i} missing required fields, skipping")
+            continue
+            
+        image_path = os.path.join(data_dir, post['image_path'])
+        if not os.path.exists(image_path):
+            logger.warning(f"Image not found: {image_path}, skipping")
+            continue
+            
+        valid_posts += 1
+    
+    logger.info(f"Dataset validation complete: {valid_posts} valid posts out of {len(metadata)} total")
+    
+    if valid_posts == 0:
+        raise ValueError("No valid posts found in dataset")
+    
+    return valid_posts
 
 def setup_model_and_processor(model_path, lora_r=16, lora_alpha=32, lora_dropout=0.1):
     """Setup model and processor with LoRA configuration"""
@@ -215,19 +258,20 @@ def setup_model_and_processor(model_path, lora_r=16, lora_alpha=32, lora_dropout
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
     
-    # Enable gradient checkpointing for memory efficiency
-    model.gradient_checkpointing_enable()
+    # Enable gradient checkpointing for memory efficiency (only if not using LoRA)
+    if not hasattr(model, 'peft_config'):
+        model.gradient_checkpointing_enable()
     
     logger.info("Model setup completed!")
     return model, processor
 
 def main():
     """Main function"""
-    parser = argparse.ArgumentParser(description="Train LFM2 model on Instagram captions using HF Trainer")
+    parser = argparse.ArgumentParser(description="Train LFM2 model on processed Instagram dataset using HF Trainer")
     
     # Data arguments
     parser.add_argument("--data-dir", type=str, required=True,
-                       help="Directory containing Instagram dataset")
+                       help="Directory containing processed Instagram dataset (e.g., ./processed_dataset/instagram_dataset)")
     parser.add_argument("--output-dir", type=str, default="./trained_model",
                        help="Output directory for trained model")
     parser.add_argument("--model-path", type=str, default="./lfm2_vl_1_6b_model",
@@ -260,22 +304,20 @@ def main():
     # Other arguments
     parser.add_argument("--val-split", type=float, default=0.1,
                        help="Validation split ratio")
-    parser.add_argument("--create-sample", action="store_true",
-                       help="Create sample dataset structure")
     parser.add_argument("--use-wandb", action="store_true",
                        help="Use Weights & Biases for logging")
     
     args = parser.parse_args()
     
-    # Create sample dataset if requested
-    if args.create_sample:
-        create_sample_dataset(args.data_dir)
-        return
-    
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
     try:
+        # Validate the dataset first
+        logger.info("Validating Instagram dataset...")
+        valid_posts = validate_dataset(args.data_dir)
+        logger.info(f"Dataset validation passed: {valid_posts} valid posts found")
+        
         # Setup model and processor
         model, processor = setup_model_and_processor(
             args.model_path,
@@ -285,14 +327,19 @@ def main():
         )
         
         # Create datasets
+        logger.info("Creating Instagram caption dataset...")
         full_dataset = InstagramCaptionDataset(
             args.data_dir, 
             processor
         )
         
+        logger.info(f"Dataset loaded successfully: {len(full_dataset)} total posts")
+        
         # Split into train/val
         val_size = int(len(full_dataset) * args.val_split)
         train_size = len(full_dataset) - val_size
+        
+        logger.info(f"Training split: {train_size} posts, Validation split: {val_size} posts")
         
         if val_size > 0:
             train_dataset, val_dataset = torch.utils.data.random_split(
@@ -306,6 +353,7 @@ def main():
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=processor.tokenizer,
             mlm=False,
+            pad_to_multiple_of=8,  # Better memory alignment
         )
         
         # Training arguments
@@ -321,17 +369,17 @@ def main():
             max_grad_norm=args.max_grad_norm,
             logging_dir=os.path.join(args.output_dir, "logs"),
             logging_steps=10,
-            evaluation_strategy="epoch" if val_dataset else "no",
+            eval_strategy="epoch" if val_dataset else "no",
             save_strategy="epoch",
             save_total_limit=3,
             load_best_model_at_end=True if val_dataset else False,
             metric_for_best_model="eval_loss" if val_dataset else None,
             greater_is_better=False if val_dataset else None,
-            fp16=True,
-            dataloader_num_workers=2,
+            fp16=False,  # Disable fp16 to avoid gradient issues
+            dataloader_num_workers=0,  # Reduce workers to avoid issues
             remove_unused_columns=False,
-            report_to="wandb" if args.use_wandb else None,
-            run_name=f"lfm2-instagram-{datetime.now().strftime('%Y%m%d-%H%M%S')}" if args.use_wandb else None,
+            report_to=[],  # Completely disable all reporting
+            run_name=f"lfm2-instagram-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
         )
         
         # Initialize trainer

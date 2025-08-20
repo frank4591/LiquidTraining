@@ -1,4 +1,9 @@
 lfm2_vl_1_6b_model/
 img1.jpg
+processed_dataset*/
+trained_model/  
+wandb/
+
+
 
 

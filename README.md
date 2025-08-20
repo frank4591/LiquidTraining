@@ -16,6 +16,8 @@ This folder contains scripts and tools for using the **LFM2-VL-1.6B** vision lan
 - `instagram_caption_generator.py` - Generates Instagram-like captions for images
 - `test_setup.py` - Tests the setup and dependencies
 - `requirements.txt` - Required Python packages
+- `run_preprocessing.sh` - Launcher for Instagram dataset preprocessing
+- `preprocessing/` - Folder containing all preprocessing scripts
 - `README.md` - This file
 
 ## 🛠️ Setup
@@ -41,6 +43,29 @@ python test_setup.py
 ```
 
 ## 📸 Usage
+
+### Preprocess Instagram Dataset for Training
+
+```bash
+# Quick preprocessing (recommended)
+./run_preprocessing.sh InstaDataset.zip
+
+# This will create a training-ready dataset in ./processed_dataset/instagram_dataset/
+```
+
+### Train the Model
+
+```bash
+# Start training on the processed dataset
+python3 train_lfm2_instagram_trainer.py \
+    --data-dir ./processed_dataset/instagram_dataset \
+    --output-dir ./trained_model \
+    --num-epochs 5 \
+    --batch-size 1 \
+    --learning-rate 5e-5
+
+# Training will create checkpoints and a final model in ./trained_model/
+```
 
 ### Generate Instagram Captions
 
