@@ -3,7 +3,8 @@ img1.jpg
 processed_dataset*/
 trained_model/  
 wandb/
-
+=*
+*.zip
 
 
 
