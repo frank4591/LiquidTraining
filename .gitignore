@@ -5,6 +5,8 @@ trained_model/
 wandb/
 =*
 *.zip
+*log
 
+workdir/
 
-
+jobdir/
