@@ -14,6 +14,7 @@
 
 import argparse
 import os
+import json
 
 from nvflare import FedJob, FilterType
 from nvflare.app_common.widgets.intime_model_selector import IntimeModelSelector
@@ -23,6 +24,28 @@ from nvflare.app_opt.pt.quantization.dequantizer import ModelDequantizer
 from nvflare.app_opt.pt.quantization.quantizer import ModelQuantizer
 from nvflare.job_config.script_runner import ScriptRunner
 
+
+def create_model_download_instruction(model_name_or_path, local_model_path):
+    """Create a model download instruction file for clients"""
+    instruction = {
+        "model_download": {
+            "model_id": "LiquidAI/LFM2-VL-450M",
+            "local_path": local_model_path,
+            "download_script": "save_lfm2_vl_model.py",
+            "instructions": [
+                "1. Run: python save_lfm2_vl_model.py",
+                "2. This will download the LFM2-VL-1.6B model to the specified local path",
+                "3. The model will be automatically loaded by the training script"
+            ],
+            "requirements": [
+                "transformers",
+                "torch",
+                "huggingface_hub",
+                "PIL"
+            ]
+        }
+    }
+    return instruction
 
 
 def main():
@@ -74,43 +97,47 @@ def main():
         job.to(dequantizer, "server", tasks=["train"], filter_type=FilterType.TASK_RESULT)
 
     # Define the model persistor and send to server
+    # Instead of sending model files, we reference the model class and let clients download the model
     if train_mode.lower() == "sft":
-        # First send the model to the server
-        job.to("src/hf_lfm2_sft_model.py", "server")
-        # Then send the model persistor to the server
+        # Reference the model class - clients will download the actual model
         model_args = {"path": "src.hf_lfm2_sft_model.LFM2VLModel", "args": {"model_name_or_path": model_name_or_path}}
     elif train_mode.lower() == "peft":
-        # First send the model to the server
-        job.to("src/hf_lfm2_peft_model.py", "server")
-        # Then send the model persistor to the server
+        # Reference the model class - clients will download the actual model
         model_args = {"path": "src.hf_lfm2_peft_model.LFM2VLPEFTModel", "args": {"model_name_or_path": model_name_or_path}}
+    
     job.to(PTFileModelPersistor(model=model_args, allow_numpy_conversion=False), "server", id="persistor")
 
     # Add model selection widget and send to server
     job.to(IntimeModelSelector(key_metric="eval_loss", negate_key_metric=True), "server", id="model_selector")
 
-
-
+    # Create model download instruction file
+    model_download_instruction = create_model_download_instruction(
+        model_name_or_path, 
+        "/home/franky/LiquidTraining/lfm2_vl_1_6b_model"
+    )
+    
     # Send ScriptRunner to all clients
     for i in range(num_clients):
         client_id = client_ids[i]
         site_name = f"site-{client_id}"
         
+        # Send the model download script to this client
+        job.to("save_lfm2_vl_model.py", site_name)
+        
         # Get the actual data path for this client
         # Each client uses the same dataset structure (processed_dataset/instagram_dataset)
-        # This matches the trainer script approach where each client has access to the same data
         if hasattr(args, 'data_paths') and args.data_paths:
-            # Use the provided data path for this client
             if i < len(args.data_paths):
                 data_path = args.data_paths[i]
             else:
                 print(f"Warning: No data path provided for client {client_id}, using default")
                 data_path = args.data_path if args.data_path else "/home/franky/LiquidTraining/processed_dataset/instagram_dataset"
         else:
-            # Use the base data path - each client accesses the same dataset
             data_path = args.data_path if args.data_path else "/home/franky/LiquidTraining/processed_dataset/instagram_dataset"
 
-        script_args = f"--model_name_or_path {model_name_or_path} --data_path_train {data_path} --data_path_valid {data_path} --output_path {output_path} --train_mode {train_mode} --message_mode {message_mode} --clean_up {clean_up} --batch_size 1 --gradient_accumulation_steps 1 --val_split 0.1"
+        # Add model download instruction to script args
+        script_args = f"--model_name_or_path {model_name_or_path} --data_path_train {data_path} --data_path_valid {data_path} --output_path {output_path} --train_mode {train_mode} --message_mode {message_mode} --clean_up {clean_up} --download_model --batch_size 1 --gradient_accumulation_steps 1 --val_split 0.1"
+        
         if message_mode == "tensor":
             server_expected_format = "pytorch"
         elif message_mode == "numpy":
@@ -133,15 +160,31 @@ def main():
     # Export the job
     print("job_dir=", job_dir)
     job.export_job(job_dir)
+    
+    # Save model download instruction to job directory
+    instruction_file = os.path.join(job_dir, "model_download_instruction.json")
+    with open(instruction_file, 'w') as f:
+        json.dump(model_download_instruction, f, indent=2)
+    print(f"Model download instruction saved to: {instruction_file}")
 
     # Run the job
     print("workspace_dir=", workspace_dir)
     print("num_threads=", num_threads)
+    print("\n" + "="*60)
+    print("IMPORTANT: Model Download Instructions")
+    print("="*60)
+    print("Before running this job, ensure each client has:")
+    print("1. The save_lfm2_vl_model.py script")
+    print("2. Run: python save_lfm2_vl_model.py")
+    print("3. This will download the LFM2-VL-1.6B model locally")
+    print("4. The training script will automatically use the downloaded model")
+    print("="*60)
+    
     job.simulator_run(workspace_dir, threads=num_threads, gpu=args.gpu)
 
 
 def define_parser():
-    parser = argparse.ArgumentParser(description="LFM2-VL Instagram Caption Training with NVFlare")
+    parser = argparse.ArgumentParser(description="LFM2-VL Instagram Caption Training with NVFlare (Optimized)")
     parser.add_argument(
         "--client_ids",
         nargs="+",
@@ -171,13 +214,13 @@ def define_parser():
         "--model_name_or_path",
         type=str,
         default="/home/franky/LiquidTraining/lfm2_vl_1_6b_model",
-        help="Path to LFM2-VL model directory",
+        help="Path to LFM2-VL model directory (will be downloaded by clients)",
     )
     parser.add_argument(
         "--data_path",
         type=str,
         default="/home/franky/LiquidTraining/processed_dataset/instagram_dataset",
-        help="Base directory for client datasets (optional). Used with data_paths argument.",
+        help="Base directory for client datasets",
     )
     parser.add_argument(
         "--data_paths",

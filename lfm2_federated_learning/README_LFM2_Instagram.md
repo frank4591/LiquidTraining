@@ -61,6 +61,7 @@ python prepare_instagram_data.py \
     --output_dir ./federated_instagram_data \
     --client_ids client_a client_b client_c
 ```
+cd /home/franky/LiquidTraining/lfm2_federated_learning && source ~/FL/bin/activate && python lfm2_instagram_fl_job_fixed.py --client_ids client_00 --data_paths /home/franky/LiquidTraining/processed_dataset/instagram_dataset --model_name_or_path LiquidAI/LFM2-VL-450M --train_mode PEFT --num_rounds 1 --threads 1 | tee run_small_model3.log
 
 ### Option 2: Use a base directory with client subdirectories
 ```bash

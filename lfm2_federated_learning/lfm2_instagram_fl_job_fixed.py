@@ -24,7 +24,6 @@ from nvflare.app_opt.pt.quantization.quantizer import ModelQuantizer
 from nvflare.job_config.script_runner import ScriptRunner
 
 
-
 def main():
     args = define_parser()
     train_script = "src/hf_lfm2_instagram_fl_fixed.py"
@@ -84,33 +83,20 @@ def main():
         job.to("src/hf_lfm2_peft_model.py", "server")
         # Then send the model persistor to the server
         model_args = {"path": "src.hf_lfm2_peft_model.LFM2VLPEFTModel", "args": {"model_name_or_path": model_name_or_path}}
+    
     job.to(PTFileModelPersistor(model=model_args, allow_numpy_conversion=False), "server", id="persistor")
 
     # Add model selection widget and send to server
     job.to(IntimeModelSelector(key_metric="eval_loss", negate_key_metric=True), "server", id="model_selector")
 
-
-
     # Send ScriptRunner to all clients
     for i in range(num_clients):
         client_id = client_ids[i]
         site_name = f"site-{client_id}"
-        
-        # Get the actual data path for this client
-        # Each client uses the same dataset structure (processed_dataset/instagram_dataset)
-        # This matches the trainer script approach where each client has access to the same data
-        if hasattr(args, 'data_paths') and args.data_paths:
-            # Use the provided data path for this client
-            if i < len(args.data_paths):
-                data_path = args.data_paths[i]
-            else:
-                print(f"Warning: No data path provided for client {client_id}, using default")
-                data_path = args.data_path if args.data_path else "/home/franky/LiquidTraining/processed_dataset/instagram_dataset"
-        else:
-            # Use the base data path - each client accesses the same dataset
-            data_path = args.data_path if args.data_path else "/home/franky/LiquidTraining/processed_dataset/instagram_dataset"
+        data_path_train = args.data_paths[i] if isinstance(args.data_paths, list) else args.data_paths
+        data_path_valid = data_path_train  # Use same path for validation
 
-        script_args = f"--model_name_or_path {model_name_or_path} --data_path_train {data_path} --data_path_valid {data_path} --output_path {output_path} --train_mode {train_mode} --message_mode {message_mode} --clean_up {clean_up} --batch_size 1 --gradient_accumulation_steps 1 --val_split 0.1"
+        script_args = f"--model_name_or_path {model_name_or_path} --data_path_train {data_path_train} --data_path_valid {data_path_valid} --output_path {output_path} --train_mode {train_mode} --message_mode {message_mode} --clean_up {clean_up} --batch_size 1 --gradient_accumulation_steps 1 --val_split 0.1"
         if message_mode == "tensor":
             server_expected_format = "pytorch"
         elif message_mode == "numpy":
@@ -141,7 +127,7 @@ def main():
 
 
 def define_parser():
-    parser = argparse.ArgumentParser(description="LFM2-VL Instagram Caption Training with NVFlare")
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--client_ids",
         nargs="+",
@@ -150,70 +136,64 @@ def define_parser():
         help="Client IDs, used to get the data path for each client",
     )
     parser.add_argument(
+        "--data_paths",
+        nargs="+",
+        type=str,
+        default=["/home/franky/LiquidTraining/processed_dataset/instagram_dataset"],
+        help="Data paths for each client",
+    )
+    parser.add_argument(
         "--num_rounds",
         type=int,
         default=3,
-        help="Number of federated learning rounds, default to 3",
+        help="Number of rounds, default to 3",
     )
     parser.add_argument(
         "--workspace_dir",
         type=str,
         default="./workdir",
-        help="Work directory, default to './workdir'",
+        help="work directory, default to './workdir'",
     )
     parser.add_argument(
         "--job_dir",
         type=str,
         default="./jobdir",
-        help="Directory for job export, default to './jobdir'",
+        help="directory for job export, default to './jobdir'",
     )
     parser.add_argument(
         "--model_name_or_path",
         type=str,
         default="/home/franky/LiquidTraining/lfm2_vl_1_6b_model",
-        help="Path to LFM2-VL model directory",
-    )
-    parser.add_argument(
-        "--data_path",
-        type=str,
-        default="/home/franky/LiquidTraining/processed_dataset/instagram_dataset",
-        help="Base directory for client datasets (optional). Used with data_paths argument.",
-    )
-    parser.add_argument(
-        "--data_paths",
-        nargs="+",
-        type=str,
-        default=["/home/franky/LiquidTraining/processed_dataset/instagram_dataset"],
-        help="List of actual data paths for each client (must match number of client_ids).",
+        help="model name or path",
     )
     parser.add_argument(
         "--train_mode",
         type=str,
         default="PEFT",
-        help="Training mode: SFT or PEFT, default to PEFT (LoRA)",
+        help="training mode, SFT or PEFT, default to PEFT",
     )
     parser.add_argument(
         "--quantize_mode",
         type=str,
         default=None,
-        help="Quantization mode, default to None (no quantization)",
+        help="quantization mode, default to None (no quantization)",
     )
     parser.add_argument(
         "--message_mode",
         type=str,
         default="numpy",
-        help="Message mode: numpy or tensor, default to numpy",
+        help="message mode, numpy or tensor, default to numpy",
     )
     parser.add_argument(
         "--threads",
         type=int,
-        help="Number of threads to use for FL simulation, default to the number of clients",
+        help="number of threads to use for FL simulation, default to the number of clients",
     )
     parser.add_argument(
         "--gpu",
         type=str,
         default="0",
-        help="GPU assignments for simulating clients, comma separated, default to single gpu",
+        help="gpu assignments for simulating clients, comma separated, default to single gpu",
     )
     return parser.parse_args()
 
