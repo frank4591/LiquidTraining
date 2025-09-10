@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 def download_model_locally():
     """Download the LFM2-VL-1.6B model and save it locally"""
     
-    model_id = "LiquidAI/LFM2-VL-1.6B"
-    local_model_path = "./lfm2_vl_1_6b_model"
-    
+    # model_id = "LiquidAI/LFM2-VL-1.6B"
+    # local_model_path = "./lfm2_vl_1_6b_model"
+    model_id = "LiquidAI/LFM2-VL-450M"
+    local_model_path = "./LFM2-VL-450M"
+
     try:
         logger.info(f"Starting download of {model_id}...")
         

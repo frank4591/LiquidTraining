@@ -226,7 +226,7 @@ def main():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="/home/franky/LiquidTraining/lfm2_vl_1_6b_model",
+        default="/home/franky/LiquidTraining/LFM2-VL-450M",
     )
     parser.add_argument(
         "--data_path_train",

@@ -26,7 +26,7 @@ from nvflare.job_config.script_runner import ScriptRunner
 
 def main():
     args = define_parser()
-    train_script = "src/hf_lfm2_instagram_fl_fixed.py"
+    train_script = "src/hf_ 2_instagram_fl_fixed.py"
     client_ids = args.client_ids
     num_clients = len(client_ids)
 
@@ -92,7 +92,7 @@ def main():
     # Send ScriptRunner to all clients
     for i in range(num_clients):
         client_id = client_ids[i]
-        site_name = f"site-{client_id}"
+        site_name = f"{client_id}"
         data_path_train = args.data_paths[i] if isinstance(args.data_paths, list) else args.data_paths
         data_path_valid = data_path_train  # Use same path for validation
 
@@ -123,7 +123,7 @@ def main():
     # Run the job
     print("workspace_dir=", workspace_dir)
     print("num_threads=", num_threads)
-    job.simulator_run(workspace_dir, threads=num_threads, gpu=args.gpu)
+    # job.simulator_run(workspace_dir, threads=num_threads, gpu=args.gpu)
 
 
 def define_parser():
@@ -163,7 +163,7 @@ def define_parser():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="/home/franky/LiquidTraining/lfm2_vl_1_6b_model",
+        default="/home/franky/LiquidTraining/LFM2-VL-450M",
         help="model name or path",
     )
     parser.add_argument(

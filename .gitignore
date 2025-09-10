@@ -10,3 +10,6 @@ wandb/
 workdir/
 
 jobdir/
+FLClient/
+config/
+lfm2_federated_learning/LFM2-VL-450M/
