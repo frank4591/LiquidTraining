@@ -113,52 +113,73 @@ class InstagramCaptionDataset(Dataset):
             if image.size != (self.image_size, self.image_size):
                 image = image.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
             
-            # Build a simple text prompt to avoid excessive nesting
-            text_prompt = f"Generate an engaging Instagram caption for this image. Reference caption: {item['caption']}"
-
-            # Tokenize WITHOUT creating tensors; let the collator handle padding and labels
+            # Create conversation format for training
+            conversation = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image},
+                        {"type": "text", "text": "Generate an engaging Instagram caption for this image."},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": item['caption']
+                }
+            ]
+            
+            # Process inputs - first get the text, then tokenize it
+            conversation_text = self.processor.apply_chat_template(
+                conversation,
+                add_generation_prompt=False,
+                return_tensors=None  # Get text first
+            )
+            
+            # Now tokenize the text properly
             try:
-                tokenized = self.processor.tokenizer(
-                    text_prompt,
-                    return_tensors=None,
+                inputs = self.processor.tokenizer(
+                    conversation_text,
+                    return_tensors="pt",
                     padding=False,
                     truncation=True,
                     max_length=self.max_length
                 )
-                # Normalize to a list[int]
-                input_ids_raw = tokenized.get("input_ids", [[]])
-                if isinstance(input_ids_raw, list) and len(input_ids_raw) > 0 and isinstance(input_ids_raw[0], list):
-                    input_ids = input_ids_raw[0]
-                elif isinstance(input_ids_raw, list) and len(input_ids_raw) > 0 and isinstance(input_ids_raw[0], int):
-                    input_ids = input_ids_raw
-                elif isinstance(input_ids_raw, int):
-                    input_ids = [input_ids_raw]
-                else:
-                    input_ids = []
+                
+                # Get the input_ids
+                inputs = inputs["input_ids"].squeeze(0)
+                
             except Exception as e:
-                logger.warning(f"Error tokenizing prompt: {e}")
-                input_ids = []
-
-            # Ensure we return Python lists so the data collator can pad and create tensors
-            if len(input_ids) > self.max_length:
-                input_ids = input_ids[:self.max_length]
-
+                logger.warning(f"Error tokenizing conversation: {e}")
+                # Create a dummy tensor as fallback
+                inputs = torch.zeros(self.max_length, dtype=torch.long)
+            
+            # Truncate if too long
+            if len(inputs) > self.max_length:
+                inputs = inputs[:self.max_length]
+            
             return {
-                'input_ids': input_ids,
+                'input_ids': inputs,
+                'attention_mask': torch.ones_like(inputs),
+                'labels': inputs.clone()
             }
             
         except Exception as e:
             logger.warning(f"Error processing item {idx}: {e}")
             # Return a dummy item with proper error handling
             try:
-                # Return a minimal valid list; collator will pad
+                dummy_input = torch.zeros(self.max_length, dtype=torch.long)
                 return {
-                    'input_ids': [0]
+                    'input_ids': dummy_input,
+                    'attention_mask': torch.ones_like(dummy_input),  # Use ones instead of zeros
+                    'labels': dummy_input.clone()
                 }
             except Exception as fallback_error:
                 logger.error(f"Critical error creating dummy item for {idx}: {fallback_error}")
+                # Return minimal valid item
                 return {
-                    'input_ids': [0]
+                    'input_ids': torch.tensor([0], dtype=torch.long),
+                    'attention_mask': torch.tensor([1], dtype=torch.long),
+                    'labels': torch.tensor([0], dtype=torch.long)
                 }
 
 def validate_dataset(data_dir):
@@ -328,11 +349,11 @@ def main():
             train_dataset = full_dataset
             val_dataset = None
         
-        # Data collator that pads and creates labels for causal LM training
+        # Data collator
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=processor.tokenizer,
             mlm=False,
-            pad_to_multiple_of=8,
+            pad_to_multiple_of=8,  # Better memory alignment
         )
         
         # Training arguments

@@ -53,7 +53,7 @@ def test_trained_model(model_path, image_path):
         return_tensors="pt",
         padding=False,
         truncation=True,
-        max_length=512
+        max_length=220
     )
     
     # Generate caption
